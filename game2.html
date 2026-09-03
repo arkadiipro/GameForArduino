@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>Kingdom Wars: Global Defense (Arduino Edition)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Metamorphous&display=swap');
+
+        /* ЗАГАЛЬНІ НАЛАШТУВАННЯ */
+        body, html {
+            margin: 0; padding: 0; overflow: hidden;
+            background-color: #050505; color: #e0e0e0;
+            font-family: 'Metamorphous', cursive;
+            user-select: none; -webkit-user-select: none;
+        }
+        #game-container { position: relative; width: 100vw; height: 100vh; }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        /* ІНТЕРФЕЙС (HUD) */
+        .hud-top {
+            position: absolute; top: 20px; left: 20px; right: 20px;
+            display: flex; justify-content: space-between; pointer-events: none; z-index: 10;
+        }
+        .resource-box {
+            background: rgba(15, 10, 10, 0.9);
+            border: 2px solid #b8860b; border-radius: 8px;
+            padding: 10px 30px; display: flex; align-items: center; gap: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.9), inset 0 0 15px rgba(218,165,32,0.2);
+            font-family: 'Cinzel', serif; font-size: 28px; font-weight: bold;
+        }
+        .text-gold { color: #ffd700; text-shadow: 2px 2px 4px #000; }
+
+        .health-bar-container {
+            width: 350px; background: #1a1a1a; border: 2px solid #444;
+            border-radius: 6px; overflow: hidden; margin-bottom: 12px; position: relative;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.8);
+        }
+        .bar-fill { height: 26px; width: 100%; transition: width 0.2s linear; }
+        #castle-hp-fill { background: linear-gradient(90deg, #004d99, #1a8cff); }
+        #wall-hp-fill { background: linear-gradient(90deg, #555555, #999999); }
+        #hero-hp-fill { background: linear-gradient(90deg, #990000, #ff1a1a); }
+        
+        .bar-label { 
+            position: absolute; top: 4px; left: 15px; font-size: 15px; 
+            font-family: 'Cinzel', serif; font-weight: bold; text-shadow: 1px 1px 2px #000; letter-spacing: 1px;
+        }
+
+        /* ПОВІДОМЛЕННЯ ПРО ПОКРАЩЕННЯ */
+        #upgrade-prompt {
+            position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: linear-gradient(180deg, rgba(20,10,0,0.9), rgba(0,0,0,0.9));
+            border: 2px solid #ffd700; padding: 20px 40px; font-size: 24px; color: white;
+            border-radius: 12px; text-align: center; display: none; z-index: 20;
+            box-shadow: 0 0 30px rgba(218,165,32,0.4);
+        }
+
+        /* МЕНЮ */
+        .fullscreen-menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #2a1616 0%, #050202 100%);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100;
+        }
+        .game-title {
+            font-family: 'Cinzel', serif; font-size: 85px; color: #ffd700;
+            text-align: center; text-shadow: 0 0 25px rgba(255,215,0,0.5), 4px 4px 0px #331a00; 
+            margin-bottom: 20px; line-height: 1.1;
+        }
+        .btn-main {
+            background: linear-gradient(180deg, #b8860b 0%, #8b6508 100%);
+            border: 2px solid #ffd700; border-radius: 8px; color: #fff;
+            padding: 20px 50px; font-size: 26px; font-family: 'Cinzel', serif; font-weight: bold;
+            cursor: pointer; transition: 0.3s; margin: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.6);
+            letter-spacing: 2px;
+        }
+        .btn-main:hover { transform: translateY(-4px); box-shadow: 0 15px 30px rgba(218,165,32,0.6); filter: brightness(1.2); }
+        .controls-hint { 
+            color: #ccc; margin-top: 40px; font-size: 18px; text-align: center; 
+            background: rgba(0,0,0,0.7); padding: 25px; border-radius: 12px; border: 1px solid #444; line-height: 1.6;
+        }
+        
+        /* ПЛАВАЮЧИЙ ТЕКСТ */
+        .floating-text {
+            position: absolute; color: white; font-weight: bold; font-family: 'Cinzel', serif;
+            pointer-events: none; z-index: 50; text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+            animation: floatUp 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-150px) scale(1.4); }
+        }
+        
+        /* ЕКРАН ШКОДИ */
+        #damage-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 0 rgba(200,0,0,0); pointer-events: none; transition: box-shadow 0.2s; z-index: 5;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="damage-overlay"></div>
+    <div id="ui-layer"></div>
+
+    <div class="hud-top" id="hud" style="display: none;">
+        <div>
+            <div class="health-bar-container">
+                <div class="bar-fill" id="castle-hp-fill"></div>
+                <div class="bar-label">ЦИТАДЕЛЬ <span id="level-txt">РІВЕНЬ 1</span></div>
+            </div>
+            <div class="health-bar-container">
+                <div class="bar-fill" id="wall-hp-fill"></div>
+                <div class="bar-label">ЗАХИСНІ СТІНИ</div>
+            </div>
+            <div class="health-bar-container">
+                <div class="bar-fill" id="hero-hp-fill"></div>
+                <div class="bar-label">ВЕРШНИК-ЗАХИСНИК</div>
+            </div>
+        </div>
+        <div class="resource-box">
+            <div>СКАРБНИЦЯ: <span class="text-gold" id="ui-gold">0</span></div>
+        </div>
+    </div>
+
+    <div id="upgrade-prompt">
+        НАТИСНІТЬ КНОПКУ ДЖОЙСТИКА ДЛЯ ЕВОЛЮЦІЇ ЗАМКУ<br>
+        <span id="upgrade-cost" style="color: #ffd700; font-size: 20px;"></span>
+    </div>
+
+    <div id="menu-screen" class="fullscreen-menu">
+        <div class="game-title">KINGDOM WARS<br><span style="font-size: 40px; color:#aaa;">ARDUINO EDITION</span></div>
+        <button class="btn-main" id="btn-connect">ПІДКЛЮЧИТИ КОНТРОЛЕР ТА ПОЧАТИ</button>
+        <div class="controls-hint">
+            <strong>СИСТЕМА УПРАВЛІННЯ (ДЖОЙСТИК):</strong><br><br>
+            <strong>Стік:</strong> Рух вершника по карті<br>
+            <strong>Кнопка Джойстика:</strong> Удар мечем (рубати дерева, бити ворогів) / Покращити замок<br>
+            <strong>Стрільба:</strong> Автоматично з лука (2 постріли в секунду) по найближчим ворогам<br>
+            Дерева та Каміння при руйнуванні приносять монети!
+        </div>
+    </div>
+
+    <div id="game-over-screen" class="fullscreen-menu" style="display: none;">
+        <div class="game-title" style="color: #ff3333; text-shadow: 0 0 30px #ff0000;">КОРОЛІВСТВО ВПАЛО</div>
+        <button class="btn-main" id="btn-restart">ПІДКЛЮЧИТИ КОНТРОЛЕР ЗНОВУ</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+/**
+ * ============================================================================
+ * KINGDOM WARS: MEGA ENGINE (ARDUINO ONLY)
+ * ============================================================================
+ */
+
+// --- ІНТЕРФЕЙС ---
+const UI = {
+    menu: document.getElementById('menu-screen'),
+    hud: document.getElementById('hud'),
+    gameOver: document.getElementById('game-over-screen'),
+    heroHpFill: document.getElementById('hero-hp-fill'),
+    castleHpFill: document.getElementById('castle-hp-fill'),
+    wallHpFill: document.getElementById('wall-hp-fill'),
+    levelTxt: document.getElementById('level-txt'),
+    uiGold: document.getElementById('ui-gold'),
+    upgradePrompt: document.getElementById('upgrade-prompt'),
+    upgradeCostTxt: document.getElementById('upgrade-cost'),
+    uiLayer: document.getElementById('ui-layer'),
+    dmgOverlay: document.getElementById('damage-overlay')
+};
+
+// --- СТАН ГРИ ---
+const GAME = {
+    isRunning: false,
+    level: 1,
+    coins: 0,
+    waveTimer: 0,
+    dayTime: 0,
+    upgradeCosts: [0, 100, 300, 800, 1500, 3000, 5000, 8000, 12000, 20000] // Ціни на 10 рівнів
+};
+
+// --- ARDUINO ВВОД ---
+let joyX = 512, joyY = 512, btnAction = 0, prevBtnAction = 0;
+let serialPort = null;
+
+async function connectArduino() {
+    if (!navigator.serial) {
+        alert("Ваш браузер не підтримує Web Serial API! Використовуйте Chrome або Edge.");
+        return;
+    }
+    try {
+        if (!serialPort) {
+            serialPort = await navigator.serial.requestPort();
+            await serialPort.open({ baudRate: 115200 });
+            readLoop(serialPort);
+        }
+        startGame();
+    } catch (err) {
+        alert("Помилка підключення джойстика. Перевірте з'єднання.");
+        console.error(err);
+    }
+}
+
+async function readLoop(port) {
+    const decoder = new TextDecoderStream();
+    port.readable.pipeTo(decoder.writable);
+    const reader = decoder.readable.getReader();
+    let buffer = '';
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        let lines = buffer.split('\n');
+        buffer = lines.pop();
+        if (lines.length > 0) {
+            let data = lines[lines.length - 1].trim().split(',');
+            if (data.length >= 3) {
+                joyX = parseInt(data[0]); 
+                joyY = parseInt(data[1]); 
+                btnAction = parseInt(data[2]); 
+            }
+        }
+    }
+}
+
+document.getElementById('btn-connect').addEventListener('click', connectArduino);
+document.getElementById('btn-restart').addEventListener('click', connectArduino);
+
+// --- THREE.JS НАЛАШТУВАННЯ ---
+const canvas = document.getElementById('gameCanvas');
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // Денне небо
+scene.fog = new THREE.Fog(0x87CEEB, 60, 200);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000);
+camera.position.set(0, 70, 80);
+camera.lookAt(0, 0, 0);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xfffaea, 1.0);
+dirLight.position.set(100, 150, -50);
+dirLight.castShadow = true;
+dirLight.shadow.camera.left = -150; dirLight.shadow.camera.right = 150;
+dirLight.shadow.camera.top = 150; dirLight.shadow.camera.bottom = -150;
+dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+scene.add(dirLight);
+
+// --- ГЛОБАЛЬНІ МАСИВИ ---
+let walls = [], enemies = [], projectiles = [], resources = [], allies = [], particles = [];
+let hero, citadel;
+
+// --- МАТЕРІАЛИ ---
+const MATS = {
+    wood: new THREE.MeshStandardMaterial({ color: 0x4a3525, roughness: 0.9 }),
+    stone: new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 }),
+    wallNormal: new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 }),
+    wallHit: new THREE.MeshStandardMaterial({ color: 0x666666, emissive: 0xaa0000, roughness: 0.8 }),
+    leaves: new THREE.MeshStandardMaterial({ color: 0x1b4d15, flatShading: true }),
+    gold: new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 }),
+    goblin: new THREE.MeshStandardMaterial({ color: 0x2d8a2d, roughness: 0.7 }),
+    orc: new THREE.MeshStandardMaterial({ color: 0x1a4d1a, roughness: 0.9 }),
+    orcElite: new THREE.MeshStandardMaterial({ color: 0x8a2d2d, roughness: 0.9 }),
+    heroArmor: new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7 }),
+    horse: new THREE.MeshStandardMaterial({ color: 0x2a1a10 }),
+    elfCloak: new THREE.MeshStandardMaterial({ color: 0x1a6629 }), // Зелений плащ ельфів
+    elfSkin: new THREE.MeshStandardMaterial({ color: 0xffe0bd }),
+    knight: new THREE.MeshStandardMaterial({ color: 0x8888aa, metalness: 0.6 })
+};
+
+// --- ФУНКЦІЇ ДОПОМОГИ ---
+function createFloatingText(text, pos, color, size = 20) {
+    const vector = pos.clone();
+    vector.project(camera);
+    const x = (vector.x * .5 + .5) * window.innerWidth;
+    const y = (vector.y * -.5 + .5) * window.innerHeight;
+    const div = document.createElement('div');
+    div.className = 'floating-text';
+    div.style.left = x + 'px'; div.style.top = y + 'px';
+    div.style.color = color; div.style.fontSize = size + 'px';
+    div.innerText = text;
+    UI.uiLayer.appendChild(div);
+    setTimeout(() => div.remove(), 1200);
+}
+
+function spawnParticles(x, y, z, color, count, type = 'normal') {
+    const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+    const mat = new THREE.MeshBasicMaterial({ color: color });
+    for (let i = 0; i < count; i++) {
+        const p = new THREE.Mesh(geo, mat);
+        p.position.set(x, y, z);
+        scene.add(p);
+        particles.push({
+            mesh: p, life: 1.0,
+            vx: (Math.random() - 0.5) * (type === 'coin' ? 0.8 : 0.5),
+            vy: Math.random() * 0.8 + 0.2,
+            vz: (Math.random() - 0.5) * (type === 'coin' ? 0.8 : 0.5),
+            decay: type === 'coin' ? 0.02 : 0.03
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.life -= p.decay;
+        p.vy -= 0.04; // Gravity
+        p.mesh.position.x += p.vx; p.mesh.position.y += p.vy; p.mesh.position.z += p.vz;
+        if (p.mesh.position.y < 0.1) {
+            p.mesh.position.y = 0.1; p.vx *= 0.5; p.vz *= 0.5;
+        }
+        p.mesh.scale.set(p.life, p.life, p.life);
+        if (p.life <= 0) { scene.remove(p.mesh); particles.splice(i, 1); }
+    }
+}
+
+function getDistance(obj1, obj2) {
+    if(!obj1 || !obj2 || !obj1.mesh || !obj2.mesh) return Infinity;
+    return obj1.mesh.position.distanceTo(obj2.mesh.position);
+}
+
+// --- КЛАСИ ОБ'ЄКТІВ ---
+
+class ResourceNode {
+    constructor(type, x, z) {
+        this.type = type;
+        this.hp = type === 'tree' ? 45 : 75; // Ударів потрібно більше
+        this.mesh = new THREE.Group();
+        this.mesh.position.set(x, 0, z);
+        
+        if (type === 'tree') {
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.8, 4), MATS.wood);
+            trunk.position.y = 2; trunk.castShadow = true;
+            const leaves = new THREE.Mesh(new THREE.DodecahedronGeometry(3, 1), MATS.leaves);
+            leaves.position.y = 5.5; leaves.castShadow = true;
+            this.mesh.add(trunk, leaves);
+        } else {
+            const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2, 0), MATS.stone);
+            rock.position.y = 1.2; rock.rotation.set(Math.random(), Math.random(), Math.random());
+            rock.castShadow = true;
+            this.mesh.add(rock);
+        }
+        scene.add(this.mesh);
+        resources.push(this);
+    }
+    takeDamage(amount) {
+        this.hp -= amount;
+        this.mesh.scale.set(0.8, 0.8, 0.8); // Анімація удару
+        setTimeout(() => { if (this.mesh) this.mesh.scale.set(1, 1, 1); }, 100);
+        spawnParticles(this.mesh.position.x, 2, this.mesh.position.z, this.type === 'tree' ? 0x8b5a2b : 0xaaaaaa, 5);
+
+        if (this.hp <= 0) {
+            scene.remove(this.mesh);
+            const index = resources.indexOf(this);
+            if(index > -1) resources.splice(index, 1);
+            
+            // Дерева і каміння дають монети
+            const reward = this.type === 'tree' ? 15 : 25;
+            GAME.coins += reward;
+            UI.uiGold.innerText = GAME.coins;
+            
+            spawnParticles(this.mesh.position.x, 1.5, this.mesh.position.z, 0xffd700, 20, 'coin');
+            createFloatingText(`+${reward} МОНЕТ`, this.mesh.position, '#ffd700', 24);
+        }
+    }
+}
+
+class Projectile {
+    constructor(startPos, target, damage, isEnemy = false) {
+        this.target = target;
+        this.damage = damage;
+        this.speed = 2.5;
+        
+        const geo = new THREE.CylinderGeometry(0.08, 0.08, 2.0);
+        const mat = new THREE.MeshBasicMaterial({ color: isEnemy ? 0xff3333 : 0xffffff });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.position.copy(startPos);
+        this.mesh.position.y += 2.5;
+        
+        // Розворот стріли початковий
+        const targetPos = this.target.mesh.position.clone(); targetPos.y += 1.5;
+        this.mesh.lookAt(targetPos);
+        this.mesh.rotateX(Math.PI / 2);
+
+        scene.add(this.mesh);
+        projectiles.push(this);
+    }
+    update() {
+        if (!this.target || !this.target.mesh.parent) {
+            this.destroy(); return;
+        }
+        
+        const targetPos = this.target.mesh.position.clone();
+        targetPos.y += 1.5;
+        
+        const dir = new THREE.Vector3().subVectors(targetPos, this.mesh.position);
+        const dist = dir.length();
+        
+        if (dist < this.speed) {
+            this.target.takeDamage(this.damage);
+            this.destroy();
+        } else {
+            dir.normalize();
+            this.mesh.position.add(dir.multiplyScalar(this.speed));
+            
+            // Оновлення повороту в польоті
+            const lookPos = this.mesh.position.clone().add(dir);
+            this.mesh.lookAt(lookPos);
+            this.mesh.rotateX(Math.PI / 2);
+        }
+    }
+    destroy() {
+        scene.remove(this.mesh);
+        const index = projectiles.indexOf(this);
+        if (index > -1) projectiles.splice(index, 1);
+    }
+}
+
+class WallSegment {
+    constructor(x, z, w, d, angle = 0) {
+        this.maxHp = 1500;
+        this.hp = this.maxHp;
+        this.geo = new THREE.BoxGeometry(w, 5, d);
+        this.mesh = new THREE.Mesh(this.geo, MATS.wallNormal);
+        this.mesh.position.set(x, 2.5, z);
+        this.mesh.rotation.y = angle;
+        this.mesh.castShadow = true; this.mesh.receiveShadow = true;
+        scene.add(this.mesh);
+    }
+    takeDamage(amount) {
+        this.hp -= amount;
+        
+        // Блимання червоним при ударі
+        this.mesh.material = MATS.wallHit;
+        setTimeout(() => { if (this.mesh && this.mesh.parent) this.mesh.material = MATS.wallNormal; }, 150);
+        
+        this.updateGlobalWallHP();
+
+        if (this.hp <= 0) {
+            spawnParticles(this.mesh.position.x, 2, this.mesh.position.z, 0x666666, 30);
+            scene.remove(this.mesh);
+            const index = walls.indexOf(this);
+            if (index > -1) walls.splice(index, 1);
+            this.updateGlobalWallHP();
+        }
+    }
+    updateGlobalWallHP() {
+        let totalHp = 0, totalMaxHp = 0;
+        walls.forEach(w => { totalHp += w.hp; totalMaxHp += w.maxHp; });
+        UI.wallHpFill.style.width = `${Math.max(0, (totalHp/totalMaxHp)*100)}%`;
+    }
+    upgrade(level) {
+        this.maxHp = 1500 + (level * 1000);
+        this.hp = this.maxHp;
+        this.mesh.scale.y = 1 + (level * 0.15); // Стіни стають вищими
+        this.mesh.position.y = (5 * this.mesh.scale.y) / 2;
+        this.updateGlobalWallHP();
+    }
+}
+
+class Citadel {
+    constructor() {
+        this.maxHp = 5000;
+        this.hp = 5000;
+        this.mesh = new THREE.Group();
+        this.mesh.position.set(0, 0, 0);
+        scene.add(this.mesh);
+        this.buildStructure();
+        this.buildWalls();
+        this.updateUI();
+    }
+    
+    buildStructure() {
+        while(this.mesh.children.length > 0) this.mesh.remove(this.mesh.children[0]);
+        
+        const lvl = GAME.level;
+        const size = 6 + lvl;
+        const height = 5 + lvl * 1.5;
+        
+        const mat = lvl < 3 ? MATS.wood : MATS.stone;
+        
+        // Основна будівля
+        const base = new THREE.Mesh(new THREE.BoxGeometry(size, height, size), mat);
+        base.position.y = height / 2; base.castShadow = true;
+        
+        // Дах
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(size * 0.8, 5, 4), new THREE.MeshStandardMaterial({color: 0x1a4ba3}));
+        roof.position.y = height + 2.5; roof.rotation.y = Math.PI/4; roof.castShadow = true;
+
+        this.mesh.add(base, roof);
+
+        // На високих рівнях додаємо башти
+        if (lvl >= 4) {
+            for(let x=-1; x<=1; x+=2) {
+                for(let z=-1; z<=1; z+=2) {
+                    const tower = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, height+4, 8), mat);
+                    tower.position.set(x*(size/2), (height+4)/2, z*(size/2)); tower.castShadow = true;
+                    const troof = new THREE.Mesh(new THREE.ConeGeometry(2.5, 3, 8), new THREE.MeshStandardMaterial({color: 0x1a4ba3}));
+                    troof.position.set(x*(size/2), height+4+1.5, z*(size/2)); troof.castShadow = true;
+                    this.mesh.add(tower, troof);
+                }
+            }
+        }
+    }
+
+    buildWalls() {
+        walls.forEach(w => scene.remove(w.mesh));
+        walls = [];
+        const d = 12; // Радіус стін
+        walls.push(new WallSegment(0, -d, d*2, 2, 0)); // Північ
+        walls.push(new WallSegment(0, d, d*2, 2, 0));  // Південь
+        walls.push(new WallSegment(-d, 0, 2, d*2, 0)); // Захід
+        walls.push(new WallSegment(d, 0, 2, d*2, 0));  // Схід
+        if(walls.length > 0) walls[0].updateGlobalWallHP();
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        this.updateUI();
+        if (this.hp <= 0 && GAME.isRunning) gameOver();
+    }
+
+    upgrade() {
+        if (GAME.level >= 10) return;
+        const cost = GAME.upgradeCosts[GAME.level];
+        if (GAME.coins >= cost) {
+            GAME.coins -= cost;
+            GAME.level++;
+            
+            this.maxHp = 5000 + (GAME.level * 3000);
+            this.hp = this.maxHp;
+            
+            this.buildStructure();
+            walls.forEach(w => w.upgrade(GAME.level));
+            
+            // --- СПАВН ЕЛЬФІВ ТА ІНШИХ СОЮЗНИКІВ ---
+            if (GAME.level === 2) spawnAllies('elf', 2); // Перші 2 ельфи
+            if (GAME.level === 3) spawnAllies('elf', 3);
+            if (GAME.level === 4) spawnAllies('knight', 3); // Лицарі
+            if (GAME.level === 5) spawnAllies('elf', 4);
+            if (GAME.level === 6) spawnAllies('knight', 5);
+            if (GAME.level >= 8) { spawnAllies('elf', 5); spawnAllies('knight', 5); }
+
+            this.updateUI();
+            UI.uiGold.innerText = GAME.coins;
+            spawnParticles(0, 10, 0, 0x00ffff, 100, 'magic');
+            createFloatingText('ЕВОЛЮЦІЯ ЦИТАДЕЛІ!', this.mesh.position, '#00ffff', 30);
+        }
+    }
+
+    updateUI() {
+        UI.castleHpFill.style.width = `${Math.max(0, (this.hp / this.maxHp) * 100)}%`;
+        UI.levelTxt.innerText = `РІВЕНЬ ${GAME.level}`;
+    }
+}
+
+// --- КЛАС ГЕРОЯ (ВЕРШНИК З АВТО-ЛУКОМ ТА МЕЧЕМ) ---
+class Hero {
+    constructor() {
+        this.maxHp = 2500;
+        this.hp = this.maxHp;
+        this.speed = 0.5; // Швидкість на коні
+        this.mesh = new THREE.Group();
+        this.mesh.position.set(0, 0, 20);
+        
+        // Модель Коня
+        const horseBody = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.8, 3.5), MATS.horse);
+        horseBody.position.y = 1.8; horseBody.castShadow = true;
+        const horseHead = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.5, 1.8), MATS.horse);
+        horseHead.position.set(0, 3.2, 1.8); horseHead.rotation.x = -0.3; horseHead.castShadow = true;
+        
+        // Модель Вершника
+        const riderBody = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.0, 1.2), MATS.heroArmor);
+        riderBody.position.set(0, 3.8, -0.3); riderBody.castShadow = true;
+        const riderHead = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), MATS.elfSkin);
+        riderHead.position.set(0, 5.2, -0.3); riderHead.castShadow = true;
+        
+        this.mesh.add(horseBody, horseHead, riderBody, riderHead);
+        scene.add(this.mesh);
+
+        this.lastShotTime = 0;
+        this.lastMeleeTime = 0;
+        this.updateUI();
+    }
+    
+    update() {
+        // --- УПРАВЛІННЯ ДЖОЙСТИКОМ ---
+        let mx = 0, mz = 0;
+        
+        // Deadzone 400-600
+        if (joyY < 400) mz = -1; // Вперед (Z-)
+        if (joyY > 600) mz = 1;  // Назад (Z+)
+        if (joyX < 400) mx = -1; // Вліво (X-)
+        if (joyX > 600) mx = 1;  // Вправо (X+)
+        
+        if (mx !== 0 || mz !== 0) {
+            const length = Math.sqrt(mx*mx + mz*mz);
+            mx = (mx/length) * this.speed; mz = (mz/length) * this.speed;
+            this.mesh.position.x += mx; this.mesh.position.z += mz;
+            this.mesh.rotation.y = Math.atan2(mx, mz);
+            
+            // Анімація скачки коня
+            this.mesh.children[0].rotation.x = Math.sin(Date.now() * 0.015) * 0.1;
+        } else {
+            this.mesh.children[0].rotation.x = 0;
+        }
+
+        // Обмеження карти
+        this.mesh.position.x = Math.max(-145, Math.min(145, this.mesh.position.x));
+        this.mesh.position.z = Math.max(-145, Math.min(145, this.mesh.position.z));
+
+        const now = Date.now();
+
+        // --- АВТОМАТИЧНА СТРІЛЬБА З ЛУКА ---
+        // 2 постріли в секунду (кожні 500мс), шкода 10. Гоблін вмирає з 6 вистрілів (60 ХП).
+        if (now - this.lastShotTime >= 500) {
+            let target = this.findNearestEnemy(50); // Радіус обстрілу
+            if (target) {
+                new Projectile(this.mesh.position, target, 10, false);
+                this.lastShotTime = now;
+            }
+        }
+
+        // --- КНОПКА ДЖОЙСТИКА (БИТИ/РУБАТИ АБО ПОКРАЩИТИ) ---
+        const isBtnPressed = (btnAction === 1);
+        const distToCastle = this.mesh.position.distanceTo(citadel.mesh.position);
+        
+        // UI для покращення
+        if (distToCastle < 18 && GAME.level < 10) {
+            const cost = GAME.upgradeCosts[GAME.level];
+            UI.upgradePrompt.style.display = 'block';
+            UI.upgradeCostTxt.innerText = `ЦІНА: ${cost} МОНЕТ`;
+            
+            if (isBtnPressed && !prevBtnAction) citadel.upgrade();
+        } else {
+            UI.upgradePrompt.style.display = 'none';
+        }
+
+        // Удар мечем (видобуток / шкода зблизька)
+        if (isBtnPressed && distToCastle >= 18 && now - this.lastMeleeTime >= 500) {
+            this.meleeAttack();
+            this.lastMeleeTime = now;
+        }
+        
+        prevBtnAction = isBtnPressed;
+    }
+
+    meleeAttack() {
+        // Анімація удару мечем (кінь стає на диби)
+        this.mesh.rotation.x = -0.3;
+        setTimeout(() => this.mesh.rotation.x = 0, 150);
+
+        const range = 7;
+        let hitSomething = false;
+
+        // Рубати дерева / каміння
+        resources.forEach(res => {
+            if (getDistance(this, res) <= range) {
+                res.takeDamage(20); // Меч завдає 20 шкоди ресурсам
+                hitSomething = true;
+            }
+        });
+
+        // Бити ворогів зблизька
+        enemies.forEach(e => {
+            if (getDistance(this, e) <= range) {
+                e.takeDamage(40); // Меч завдає 40 шкоди ворогам
+                hitSomething = true;
+                spawnParticles(e.mesh.position.x, 2, e.mesh.position.z, 0x880000, 10);
+            }
+        });
+    }
+
+    findNearestEnemy(maxRange) {
+        let nearest = null, minDist = maxRange;
+        enemies.forEach(e => {
+            const d = getDistance(this, e);
+            if (d < minDist) { minDist = d; nearest = e; }
+        });
+        return nearest;
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        this.updateUI();
+        
+        UI.dmgOverlay.style.boxShadow = 'inset 0 0 150px rgba(255,0,0,0.6)';
+        setTimeout(() => UI.dmgOverlay.style.boxShadow = 'inset 0 0 0 rgba(200,0,0,0)', 150);
+
+        if (this.hp <= 0 && GAME.isRunning) gameOver();
+    }
+    updateUI() {
+        UI.heroHpFill.style.width = `${Math.max(0, (this.hp / this.maxHp) * 100)}%`;
+    }
+}
+
+// --- ЕЛЬФИ ТА СОЮЗНИКИ ---
+class Ally {
+    constructor(type) {
+        this.type = type; // 'elf' або 'knight'
+        this.mesh = new THREE.Group();
+        
+        if (type === 'elf') {
+            // Ельф-лучник (Зелений плащ)
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, 1), MATS.elfCloak);
+            body.position.y = 1.6; body.castShadow = true;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), MATS.elfSkin);
+            head.position.y = 2.8; head.castShadow = true;
+            this.mesh.add(body, head);
+        } else {
+            // Лицар (Броня)
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.8, 1.2), MATS.knight);
+            body.position.y = 1.8; body.castShadow = true;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), MATS.knight);
+            head.position.y = 3.1; head.castShadow = true;
+            this.mesh.add(body, head);
+        }
+
+        // З'являються навколо замку
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 15 + Math.random() * 5;
+        this.mesh.position.set(Math.cos(angle)*radius, 0, Math.sin(angle)*radius);
+        scene.add(this.mesh);
+        
+        this.lastAttackTime = 0;
+        allies.push(this);
+    }
+    
+    update() {
+        let nearest = null, minDist = Infinity;
+        enemies.forEach(e => {
+            const d = getDistance(this, e);
+            if (d < minDist) { minDist = d; nearest = e; }
+        });
+
+        if (!nearest) return;
+
+        const now = Date.now();
+
+        if (this.type === 'elf') {
+            // Ельфи стріляють ТОЧНО ЯК ГЕРОЙ (2 рази в секунду, автонаведення)
+            this.mesh.lookAt(nearest.mesh.position);
+            if (minDist < 50 && now - this.lastAttackTime >= 500) {
+                new Projectile(this.mesh.position, nearest, 10, false);
+                this.lastAttackTime = now;
+            }
+        } else {
+            // Лицарі біжать в ближній бій
+            if (minDist > 2.5) {
+                const dir = new THREE.Vector3().subVectors(nearest.mesh.position, this.mesh.position).normalize();
+                this.mesh.position.add(dir.multiplyScalar(0.25)); // Швидкість лицаря
+                this.mesh.lookAt(nearest.mesh.position);
+            } else if (now - this.lastAttackTime >= 1000) { // Удар мечем 1 раз на сек
+                nearest.takeDamage(20);
+                this.lastAttackTime = now;
+                // Анімація удару
+                this.mesh.rotation.x = -0.2;
+                setTimeout(() => { if(this.mesh) this.mesh.rotation.x = 0; }, 100);
+            }
+        }
+    }
+}
+
+function spawnAllies(type, count) {
+    for (let i = 0; i < count; i++) {
+        new Ally(type);
+    }
+}
+
+// --- ВОРОГИ (Гобліни, Орки) ---
+class Enemy {
+    constructor(x, z, type = 'goblin') {
+        this.type = type;
+        
+        // Зростання сили з кожною хвилею (рівнем)
+        const diffMultiplier = 1 + (GAME.waveTimer / 3000); 
+        
+        if (type === 'goblin') {
+            this.hp = 60 * diffMultiplier; // Гоблін - 60 ХП (рівно 6 стріл героя)
+            this.damage = 10;
+            this.speed = 0.08 + Math.random() * 0.04;
+        } else if (type === 'orc') {
+            this.hp = 150 * diffMultiplier;
+            this.damage = 20;
+            this.speed = 0.06;
+        } else { // elite
+            this.hp = 300 * diffMultiplier;
+            this.damage = 35;
+            this.speed = 0.09;
+        }
+        
+        this.mesh = new THREE.Group();
+        const mat = type === 'goblin' ? MATS.goblin : (type === 'orc' ? MATS.orc : MATS.orcElite);
+        
+        const size = type === 'goblin' ? 1 : 1.5;
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.2*size, 1.8*size, 1.2*size), mat);
+        body.position.y = 1.8 * size / 2; body.castShadow = true;
+        this.mesh.add(body);
+        
+        this.mesh.position.set(x, 0, z);
+        scene.add(this.mesh);
+        enemies.push(this);
+        
+        this.attackTimer = 0;
+    }
+    
+    update() {
+        if (this.attackTimer > 0) this.attackTimer--;
+
+        // Пріоритет цілей: Стіна -> Герой -> Цитадель
+        let target = null, minDist = Infinity;
+
+        // Шукаємо найближчу живу стіну
+        walls.forEach(w => {
+            const d = getDistance(this, w);
+            if (d < minDist) { minDist = d; target = w; }
+        });
+
+        // Якщо стін немає, йдемо на героя або цитадель
+        if (!target) {
+            const dHero = getDistance(this, hero);
+            const dCastle = getDistance(this, citadel);
+            if (dHero < dCastle && dHero < 25) { target = hero; minDist = dHero; }
+            else { target = citadel; minDist = dCastle; }
+        }
+
+        if (!target || !target.mesh) return;
+
+        // Рух та атака
+        const tPos = target.mesh.position || target.position;
+        // Для стін дистанція атаки більша через їх розмір
+        const attackRange = (target instanceof WallSegment || target instanceof Citadel) ? 6 : 2.5;
+
+        if (minDist > attackRange) {
+            const dir = new THREE.Vector3().subVectors(tPos, this.mesh.position).normalize();
+            this.mesh.position.add(dir.multiplyScalar(this.speed));
+            this.mesh.lookAt(tPos.x, this.mesh.position.y, tPos.z);
+            
+            // Анімація ходьби
+            this.mesh.children[0].rotation.z = Math.sin(Date.now() * 0.01) * 0.15;
+        } else {
+            this.mesh.children[0].rotation.z = 0;
+            if (this.attackTimer <= 0) {
+                target.takeDamage(this.damage);
+                this.attackTimer = 60; // Перезарядка удару (~1 сек)
+                
+                // Анімація удару
+                this.mesh.position.add(new THREE.Vector3().subVectors(tPos, this.mesh.position).normalize().multiplyScalar(0.5));
+                setTimeout(() => { if(this.mesh) this.mesh.position.add(new THREE.Vector3().subVectors(this.mesh.position, tPos).normalize().multiplyScalar(0.5)); }, 100);
+            }
+        }
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        
+        // Відкидання
+        this.mesh.position.add(new THREE.Vector3(0,0,1).applyEuler(this.mesh.rotation).multiplyScalar(-0.3));
+
+        if (this.hp <= 0) {
+            spawnParticles(this.mesh.position.x, 1.5, this.mesh.position.z, 0x880000, 15); // Кров
+            scene.remove(this.mesh);
+            const index = enemies.indexOf(this);
+            if (index > -1) enemies.splice(index, 1);
+            
+            // Нагорода (тільки монети)
+            let reward = this.type === 'goblin' ? 5 : (this.type === 'orc' ? 15 : 30);
+            reward += Math.floor(GAME.level * 1.5); // Бонус рівня
+            
+            GAME.coins += reward;
+            UI.uiGold.innerText = GAME.coins;
+            createFloatingText(`+${reward}`, this.mesh.position, '#ffd700', 22);
+            spawnParticles(this.mesh.position.x, 1, this.mesh.position.z, 0xffd700, 5, 'coin');
+        }
+    }
+}
+
+// --- ЛОГІКА ГРИ ТА ГЕНЕРАЦІЯ ---
+function generateMap() {
+    // Темна трава
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({color: 0x1a2e15}));
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Ліси та каміння (більше густоти для видобутку монет)
+    for(let i=0; i<300; i++) {
+        let x = (Math.random() - 0.5) * 350;
+        let z = (Math.random() - 0.5) * 350;
+        // Не спавнити в зоні бази
+        if (Math.abs(x) < 25 && Math.abs(z) < 25) continue;
+        new ResourceNode(Math.random() > 0.3 ? 'tree' : 'rock', x, z);
+    }
+}
+
+function spawnEnemyLogic() {
+    GAME.waveTimer++;
+    
+    // Спавн стає частішим з часом і рівнем
+    let spawnRate = Math.max(10, 100 - (GAME.level * 8) - Math.floor(GAME.waveTimer/1000));
+    
+    if (GAME.waveTimer % spawnRate === 0 && enemies.length < 150) {
+        let angle = Math.random() * Math.PI * 2;
+        let r = 160; // Спавн за межами екрану
+        
+        let type = 'goblin';
+        let roll = Math.random();
+        if (GAME.level >= 4 && roll > 0.7) type = 'orc';
+        if (GAME.level >= 7 && roll > 0.9) type = 'elite';
+        
+        new Enemy(Math.cos(angle)*r, Math.sin(angle)*r, type);
+    }
+}
+
+function updateEnvironment() {
+    // Фіксоване блакитне небо та туман (без затемнення)
+    scene.background.setHex(0x87CEEB);
+    scene.fog.color.setHex(0x87CEEB);
+    
+    // Фіксоване яскраве сонце (не рухається і не гасне)
+    dirLight.intensity = 1.0;
+    dirLight.position.set(100, 150, -50);
+}
+function startGame() {
+    UI.menu.style.display = 'none';
+    UI.gameOver.style.display = 'none';
+    UI.hud.style.display = 'flex';
+
+    // Очищення сцени
+    if (hero) scene.remove(hero.mesh);
+    if (citadel) scene.remove(citadel.mesh);
+    walls.forEach(w => scene.remove(w.mesh));
+    enemies.forEach(e => scene.remove(e.mesh));
+    resources.forEach(r => scene.remove(r.mesh));
+    allies.forEach(a => scene.remove(a.mesh));
+    projectiles.forEach(p => scene.remove(p.mesh));
+    particles.forEach(p => scene.remove(p.mesh));
+    
+    walls = []; enemies = []; resources = []; allies = []; projectiles = []; particles = [];
+
+    GAME.isRunning = true;
+    GAME.level = 1;
+    GAME.coins = 0;
+    GAME.waveTimer = 0;
+    GAME.dayTime = Math.PI / 2; // Початок дня
+    
+    UI.uiGold.innerText = '0';
+
+    generateMap();
+    citadel = new Citadel();
+    hero = new Hero();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+    GAME.isRunning = false;
+    UI.hud.style.display = 'none';
+    UI.upgradePrompt.style.display = 'none';
+    UI.gameOver.style.display = 'flex';
+}
+
+function gameLoop() {
+    if (GAME.isRunning) {
+        hero.update();
+        enemies.forEach(e => e.update());
+        projectiles.forEach(p => p.update());
+        allies.forEach(a => a.update());
+        
+        spawnEnemyLogic();
+        updateEnvironment();
+        updateParticles();
+
+        // Камера слідує за гравцем плавно, ізометричний вигляд
+        camera.position.x += (hero.mesh.position.x - camera.position.x) * 0.05;
+        camera.position.z += (hero.mesh.position.z + 60 - camera.position.z) * 0.05;
+        camera.lookAt(hero.mesh.position);
+    }
+    
+    renderer.render(scene, camera);
+    if(GAME.isRunning || document.getElementById('menu-screen').style.display === 'flex') {
+        requestAnimationFrame(gameLoop);
+    }
+}
+requestAnimationFrame(gameLoop);
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
